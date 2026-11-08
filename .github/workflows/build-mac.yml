@@ -1,0 +1,43 @@
+name: Build Mac app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python from python.org (universal2, fresh Tk)
+        run: |
+          curl -fsSLo python.pkg https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg
+          sudo installer -pkg python.pkg -target /
+          echo "PY=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3" >> "$GITHUB_ENV"
+
+      - name: Build Tabletochnitsa.app
+        run: |
+          "$PY" -c "import tkinter; print('Tk', tkinter.Tcl().eval('info patchlevel'))"
+          "$PY" -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip pyinstaller certifi
+          sed -i '' "s/target_arch=None/target_arch='universal2'/" Tabletochnitsa.spec
+          .venv/bin/python -m PyInstaller --noconfirm --clean Tabletochnitsa.spec
+          lipo -info dist/Tabletochnitsa.app/Contents/MacOS/Tabletochnitsa
+
+      - name: Pack into DMG
+        run: |
+          mkdir dmg
+          cp -R dist/Tabletochnitsa.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname Tabletochnitsa -srcfolder dmg -ov -format UDZO Tabletochnitsa.dmg
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" Tabletochnitsa.dmg \
+            --title "Таблеточница для Mac, сборка ${{ github.run_number }}" \
+            --notes "Универсальная сборка: Apple Silicon и Intel."
